@@ -69,7 +69,24 @@ fn is_next_eq(at: usize, v: &Vec<char>, c: char) -> bool {
   }
 }
 
-// TODO \nを特別扱いする処理を書く
+fn get_unescaped_string(s: &[char]) -> String {
+  let mut target_str: String = String::new(); // エスケープを取り除かれた文字列
+  let mut ignore_next = false;
+  for j in 0..s.len() {
+    if ignore_next {
+      target_str.push(s[j]);
+      ignore_next = false;
+    } else {
+      if s[j] == '\\' {
+        ignore_next = true;
+      } else {
+        target_str.push(s[j]);
+      }
+    }
+  }
+  target_str
+}
+
 // TODO \n|の処理を書く
 pub fn tokenize(s: &str) -> Vec<Token> {
   let mut data: TokenData = TokenData::new();
@@ -121,18 +138,21 @@ pub fn tokenize(s: &str) -> Vec<Token> {
     }
 
     match chars[i] {
-      '[' => {
+      '[' => 'square_brace: {
         if is_next_eq(i, &chars, '[') {
           if is_next_eq(i+1, &chars, '[') {
             let mut elem_specifier_len = 0;
-            while i+3+elem_specifier_len < chars.len() {
-              if chars[i+1+elem_specifier_len] != '\\' && is_next_eq(i+2+elem_specifier_len, &chars, ']') && is_next_eq(i+2+elem_specifier_len+1, &chars, ']') && is_next_eq(i+2+elem_specifier_len+2, &chars, ']') {
+            while i+3+elem_specifier_len < chars.len() { // i+3+elem_specifier_lenに本体を伸ばせるかを見る
+              if chars[i+2+elem_specifier_len] != '\\' && chars[i+3+elem_specifier_len] == ']' && is_next_eq(i+3+elem_specifier_len, &chars, ']') && is_next_eq(i+3+elem_specifier_len+1, &chars, ']') {
                 break;
+              }
+              if chars[i+3+elem_specifier_len] == '\n' {
+                break 'square_brace;
               }
               elem_specifier_len+=1;
             };
 
-            let target_str: String = (&chars[i+3..i+3+elem_specifier_len]).iter().collect();
+            let target_str: String = get_unescaped_string(&chars[i+3..i+3+elem_specifier_len]);
 
             if target_str.contains('|') {
               let v: (&str, &str) = target_str.split_once('|').unwrap();
@@ -142,18 +162,22 @@ pub fn tokenize(s: &str) -> Vec<Token> {
               data.flush_and_add_token(Token::PageLink { link: String::from(target_str), name: String::from("") });
             }
 
-            i += 3 + elem_specifier_len + 3 - 1;
+            i += 3 + elem_specifier_len + 3;
+            continue 'chars_loop;
           } else {
             // elem_begin
             let mut elem_specifier_len = 0;
-            while i+2+elem_specifier_len < chars.len() {
-              if chars[i+elem_specifier_len] != '\\' && is_next_eq(i+1+elem_specifier_len, &chars, ']') && is_next_eq(i+1+elem_specifier_len+1, &chars, ']') {
+            while i+2+elem_specifier_len < chars.len() { // i+2+elem_specifier_lenに本体を伸ばせるかを見る
+              if chars[i+1+elem_specifier_len] != '\\' && chars[i+2+elem_specifier_len] == ']' && is_next_eq(i+2+elem_specifier_len, &chars, ']') {
                 break;
+              }
+              if chars[i+2+elem_specifier_len] == '\n' {
+                break 'square_brace;
               }
               elem_specifier_len+=1;
             };
 
-            let target_str: String = (&chars[i+2..i+2+elem_specifier_len]).iter().collect();
+            let target_str: String = get_unescaped_string(&chars[i+2..i+2+elem_specifier_len]);
 
             if target_str.starts_with("/") {
               data.flush_and_add_token(Token::ElementEnd((&target_str[1..]).into()));
@@ -179,40 +203,37 @@ pub fn tokenize(s: &str) -> Vec<Token> {
 
               data.flush_and_add_token(Token::ElementBegin { name, attributes });
             }
-            i += 2 + elem_specifier_len + 2 - 1;
+            i += 2 + elem_specifier_len + 2;
+            continue 'chars_loop;
           }
         } else {
           let mut elem_specifier_len = 0;
 
-          while i+1+elem_specifier_len < chars.len() {
-            if chars[i+1+elem_specifier_len] != '\\' && is_next_eq(i+1+elem_specifier_len, &chars, ']') {
+          while i+1+elem_specifier_len < chars.len() { // i+1+elem_specifier_lenに本体を伸ばせるかを見る
+            if chars[i+elem_specifier_len] != '\\' && chars[i+1+elem_specifier_len] == ']' {
               break;
+            }
+            if chars[i+1+elem_specifier_len] == '\n' {
+              break 'square_brace;
             }
             elem_specifier_len+=1;
           };
 
-          let target_str = &chars[i+1..i+2+elem_specifier_len];
+          let target_str = get_unescaped_string(&chars[i+1..i+1+elem_specifier_len]);
 
-          // find first whitespace
-          let mut first_whitespace = usize::MAX;
-          for (at, j) in target_str.iter().enumerate() {
-            if *j == ' ' {
-              first_whitespace = at;
-              break;
-            }
-          }
-
-          if first_whitespace != usize::MAX && first_whitespace != target_str.len()-1 {
+          if let Some(v) = target_str.split_once(" ") {
             data.flush_and_add_token(Token::NamedLink {
-              link: (&target_str[..first_whitespace]).iter().collect(),
-              name: (&target_str[first_whitespace+1..]).iter().collect()
+              link: String::from(v.0),
+              name: String::from(v.1),
             });
 
-            i += 1 + (elem_specifier_len + 1) + 1 - 1;
+            i += 1 + elem_specifier_len + 1;
+            continue 'chars_loop;
           }
         }
       }
 
+      // TODO: いくつかの他の記号に対応
       '|' => {
         if is_next_eq(i, &chars, '|') {
           if is_next_eq(i+1, &chars, '~') {
