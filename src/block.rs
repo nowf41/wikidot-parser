@@ -2,113 +2,118 @@ use crate::tokenizer::Token;
 use crate::ast::table_cell;
 
 mod parse_table;
+mod data_builder;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum BlockLevelAttribute {
   BlockQuote(Vec<BlockLevelAttribute>),
   Table(Vec<Vec<table_cell::Cell>>), // Inline以外中には入らないようにする必要がある.
+  TabView(Vec<(String, Vec<BlockLevelAttribute>)>),
 
   Inline(Vec<crate::tokenizer::Token>), // トップレベルのInlineは段落を示す.
 }
 
-pub struct DataBuilder {
-  data: Vec<Vec<BlockLevelAttribute>>, // BlockQuoteの深さでインデックス。0番は深さ0(=BlockQuoteなし)で1番は深さ1(=`> Lorem ipsum`)
-}
-
-impl DataBuilder {
-  pub fn new() -> Self {
-    Self {
-      data: vec![vec![]], // the size of this must keep 1 or above, or Rust may panics
-    }
-  }
-
-  fn change_stack_quote_level_to(&mut self, depth: usize) {
-    let target_data_size: usize = depth + 1;
-    if self.data.len() > target_data_size {
-      while self.data.len() > target_data_size { // length is 2 or above
-        let attrs = self.data.pop().unwrap();
-        self.data.last_mut().unwrap().push(BlockLevelAttribute::BlockQuote(attrs));
-      }
-    } else if self.data.len() < target_data_size {
-      while self.data.len() < target_data_size {
-        self.data.push(vec![]);
-      }
-    }
-  }
-
-  // 深さ0はBlockQuoteなし
-  pub fn add_block(&mut self, mut buf: Vec<crate::tokenizer::Token>, depth: usize) {
-    self.change_stack_quote_level_to(depth);
-
-    while let Some(Token::NewLine) = buf.last() {
-      buf.pop().unwrap();
-    }
-
-    for v in parse_table::parse_table(&mut buf) {
-      self.data.last_mut().unwrap().push(v); // data array never be empty
-    }
-  }
-
-  pub fn get(mut self) -> Vec<BlockLevelAttribute> {
-    self.change_stack_quote_level_to(0);
-    std::mem::take(&mut self.data[0])
-  }
+pub enum BlockLevelFrame {
+  BlockQuote,
+  TabView {
+    tabs: Vec<(String, Vec<BlockLevelAttribute>)>,
+  },
+  Tab{title: String},
+  // Table ... trailing element
+  // Inline ... trailing element
 }
 
 
 pub fn parse(tokens: Vec<crate::tokenizer::Token>) -> Vec<BlockLevelAttribute> {
-  let mut db = DataBuilder::new();
+  let mut db = data_builder::DataBuilder::new();
 
-  let mut buf: Vec<crate::tokenizer::Token> = vec![];
-  let mut last_depth: usize = 0;
-  let mut was_prev_newline = false; // token列で単純に直前がNewLineであるかを保存.
-
+  let mut is_last_newline = false;
   for token in tokens {
     match token {
       Token::BlockQuote(level) => {
-        let level: usize = level.get();
-        if last_depth != level {
-          // end of the block
-          db.add_block(std::mem::take(&mut buf), last_depth);
-        } else {
-          // continue; nothing to do
+        db.set_bq_depth(level.get());
+
+        is_last_newline = false;
+      }
+
+      Token::ElementBegin { ref name, ref attributes } => {
+        if is_last_newline {
+          db.set_bq_depth(0);
         }
 
-        last_depth = level;
-        was_prev_newline = false;
+        match name.as_str() {
+          "tabview" => {
+            db.push(BlockLevelFrame::TabView { tabs: vec![] });
+          }
+
+          "tab" => {
+            let mut title = String::new();
+            for (key, value) in attributes {
+              if key.is_empty() {
+                if !title.is_empty() {
+                  title.push(' ');
+                }
+                title += value;
+              }
+            }
+
+            db.push(BlockLevelFrame::Tab { title });
+          }
+
+          &_ => {
+            db.add_token(token);
+          }
+        }
+
+        is_last_newline = false;
+      }
+
+      Token::ElementEnd(ref name) => {
+        if is_last_newline {
+          db.set_bq_depth(0);
+        }
+
+        match name.as_str() {
+          "tabview" => {
+            if let Some(BlockLevelFrame::TabView { tabs: _ }) = db.get_last_frame() {
+              db.pop_and_merge();
+            }
+          }
+
+          "tab" => {
+            if let Some(BlockLevelFrame::Tab { title: _ }) = db.get_last_frame() {
+              db.pop_and_merge();
+            }
+          }
+
+          &_ => {
+            db.add_token(token);
+          }
+        }
+
+        is_last_newline = false;
       }
 
       Token::NewLine => {
-        if was_prev_newline {
-          // End of the block
-          db.add_block(std::mem::take(&mut buf), last_depth);
-        }
-        if !buf.is_empty() {
-          if let Some(Token::NewLine) = buf.last() {
-            // skip
-          } else {
-            buf.push(Token::NewLine);
-          }
+        if is_last_newline {
+          db.flush();
+          db.set_bq_depth(0);
         } else {
-          // skip
+          db.add_token(token);
         }
 
-        was_prev_newline = true;
+        is_last_newline = true;
       }
 
       _ => {
-        if was_prev_newline { // Newlineの直後にBlockQuoteでない要素が来た == BlockQuote全体の終わり
-          db.add_block(std::mem::take(&mut buf), last_depth);
-          last_depth = 0;
+        if is_last_newline {
+          db.set_bq_depth(0);
         }
-        buf.push(token);
 
-        was_prev_newline = false;
+        db.add_token(token);
       }
     }
   }
-
-  db.add_block(buf, last_depth);
 
   db.get()
 }
@@ -119,6 +124,10 @@ mod tests {
 
   fn nz(v: usize) -> std::num::NonZeroUsize {
     std::num::NonZeroUsize::try_from(v).unwrap()
+  }
+
+  fn sf(st: &str) -> String {
+    String::from(st)
   }
 
   #[test]
@@ -141,8 +150,6 @@ mod tests {
       ])
     ]);
   }
-
-  // AI-generated tests are below
 
   #[test]
   fn test_table_in_blocks() {
@@ -188,6 +195,63 @@ mod tests {
         ]),
         BlockLevelAttribute::Inline(vec![Token::Text(String::from("After"))]),
       ])
+    ]);
+  }
+
+  #[test]
+  fn test_tabview() {
+    use crate::tokenizer::Token;
+
+    let tokens = vec![
+      Token::ElementBegin { name: String::from("tabview"), attributes: vec![] },
+      Token::ElementBegin { name: String::from("tab"), attributes: vec![(String::from(""), String::from("Tab 1"))] },
+      Token::Text(String::from("txt 1")),
+      Token::ElementEnd(String::from("tab")),
+      Token::ElementBegin { name: String::from("tab"), attributes: vec![(String::from(""), String::from("Tab 2"))] },
+      Token::Text(String::from("txt 2")),
+      Token::ElementEnd(String::from("tab")),
+      Token::ElementBegin { name: String::from("tab"), attributes: vec![(String::from(""), String::from("Tab 3"))] },
+      Token::Text(String::from("txt 3")),
+      Token::ElementEnd(String::from("tab")),
+      Token::ElementEnd(String::from("tabview")),
+    ];
+
+    let parsed = parse(tokens);
+
+    assert_eq!(parsed, vec![
+      BlockLevelAttribute::TabView(vec![
+        (String::from("Tab 1"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 1"))])]),
+        (String::from("Tab 2"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 2"))])]),
+        (String::from("Tab 3"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 3"))])]),
+      ]),
+    ]);
+  }
+
+  #[test]
+  fn test_tabview_in_blockquote() {
+    use crate::tokenizer::Token;
+
+    let tokens = vec![
+      Token::BlockQuote(nz(1)),
+      Token::ElementBegin { name: String::from("tabview"), attributes: vec![] },
+      Token::ElementBegin { name: String::from("tab"), attributes: vec![(String::from(""), String::from("Tab 1"))] },
+      Token::Text(String::from("txt 1")),
+      Token::ElementEnd(String::from("tab")),
+      Token::ElementBegin { name: String::from("tab"), attributes: vec![(String::from(""), String::from("Tab 2"))] },
+      Token::Text(String::from("txt 2")),
+      Token::ElementEnd(String::from("tab")),
+      Token::ElementEnd(String::from("tabview")),
+    ];
+
+    let parsed = parse(tokens);
+
+    assert_eq!(parsed, vec![
+      BlockLevelAttribute::BlockQuote(vec![
+        BlockLevelAttribute::TabView(vec![
+          (String::from("Tab 1"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 1"))])]),
+          (String::from("Tab 2"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 2"))])]),
+        ]),
+      ]),
     ]);
   }
 }

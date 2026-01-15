@@ -57,7 +57,7 @@ pub mod table_cell {
     Title,
   }
 
-  #[derive(Debug, PartialEq, Eq)]
+  #[derive(Debug, Clone, PartialEq, Eq)]
   pub struct Cell {
     pub val: Vec<crate::tokenizer::Token>,
     pub style: Option<Style>,
@@ -65,7 +65,7 @@ pub mod table_cell {
   }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeElement {
   Text(String),
   Bold(Vec<TreeElement>),

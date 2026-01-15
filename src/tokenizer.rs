@@ -17,7 +17,7 @@ pub enum Token {
   NamedLink{link: String, name: String},
   PageLink{link: String, name: String},
   BlockQuote(std::num::NonZeroUsize), // TODO: u8で管理していた頃の名残のコードを吹き飛ばす
-  CellSeparator(Option<crate::block::table_cell::Style>), // ||[~<=>]?
+  CellSeparator(Option<crate::ast::table_cell::Style>), // ||[~<=>]?
   NewLine, // \n
 
   Text(String)
@@ -59,7 +59,7 @@ impl TokenData {
   }
 }
 
-fn is_next_eq(at: usize, v: &Vec<char>, c: char) -> bool {
+fn is_next_eq(at: usize, v: &[char], c: char) -> bool {
   if at+1 >= v.len() {
     false
   } else {
@@ -71,16 +71,14 @@ fn is_next_eq(at: usize, v: &Vec<char>, c: char) -> bool {
 fn get_unescaped_string(s: &[char]) -> String {
   let mut target_str: String = String::new(); // エスケープを取り除かれた文字列
   let mut ignore_next = false;
-  for j in 0..s.len() {
+  for char in s {
     if ignore_next {
-      target_str.push(s[j]);
+      target_str.push(*char);
       ignore_next = false;
+    } else if *char == '\\' {
+      ignore_next = true;
     } else {
-      if s[j] == '\\' {
-        ignore_next = true;
-      } else {
-        target_str.push(s[j]);
-      }
+      target_str.push(*char);
     }
   }
   target_str
@@ -109,12 +107,10 @@ pub fn tokenize(s: String) -> Vec<Token> {
   let mut i = 0;
   'chars_loop: while i < chars.len() {
     // check escape
-    if chars[i] == '@' {
-      if is_next_eq(i, &chars, '@') {
-        i += 2;
-        is_escaping_parse = !is_escaping_parse;
-        continue 'chars_loop;
-      }
+    if chars[i] == '@' && is_next_eq(i, &chars, '@') {
+      i += 2;
+      is_escaping_parse = !is_escaping_parse;
+      continue 'chars_loop;
     }
 
     if is_escaping_parse {
@@ -124,12 +120,10 @@ pub fn tokenize(s: String) -> Vec<Token> {
     }
 
     for (c, t) in &tokenize_if_double {
-      if chars[i] == *c {
-        if is_next_eq(i, &chars, *c) {
-          data.flush_and_add_token(t.clone());
-          i += 2;
-          continue 'chars_loop;
-        }
+      if chars[i] == *c && is_next_eq(i, &chars, *c) {
+        data.flush_and_add_token(t.clone());
+        i += 2;
+        continue 'chars_loop;
       }
     }
 
@@ -156,7 +150,7 @@ pub fn tokenize(s: String) -> Vec<Token> {
 
               data.flush_and_add_token(Token::PageLink { link: String::from(v.0), name: String::from(v.1) });
             } else {
-              data.flush_and_add_token(Token::PageLink { link: String::from(target_str), name: String::from("") });
+              data.flush_and_add_token(Token::PageLink { link: target_str, name: String::from("") });
             }
 
             i += 3 + elem_specifier_len + 3;
@@ -175,7 +169,7 @@ pub fn tokenize(s: String) -> Vec<Token> {
             let target_str: String = get_unescaped_string(&chars[i+2..i+2+elem_specifier_len]);
 
             if target_str.starts_with("/") { // 閉じタグ
-              data.flush_and_add_token(Token::ElementEnd((&target_str[1..]).into()));
+              data.flush_and_add_token(Token::ElementEnd(target_str.strip_prefix("/").unwrap().into()));
             } else {
               let mut name = String::new();
               let mut attributes: Vec<(String, String)> = vec![];
@@ -184,15 +178,13 @@ pub fn tokenize(s: String) -> Vec<Token> {
                 if at == 0 {
                   name = String::from(v);
                 }
-                else {
-                  if v.contains('=') {
-                    let mut v: Vec<&str> = v.splitn(2, '=').collect();
-                    if v[0].len() > 0 && v[1].len() > 2 {
-                      attributes.push((String::from(v[0]), String::from(&v[1][1..(v[1].len()-1)])));
-                    }
-                  } else {
-                    attributes.push((String::from(""), String::from(v)));
+                else if v.contains('=') {
+                  let v: Vec<&str> = v.splitn(2, '=').collect();
+                  if v.len() == 2 {
+                    attributes.push((String::from(v[0]), String::from(&v[1][1..(v[1].len()-1)])));
                   }
+                } else {
+                  attributes.push((String::from(""), String::from(v)));
                 }
               }
 
@@ -232,16 +224,16 @@ pub fn tokenize(s: String) -> Vec<Token> {
       '|' => {
         if is_next_eq(i, &chars, '|') {
           if is_next_eq(i+1, &chars, '~') {
-            data.flush_and_add_token(Token::CellSeparator(Some(crate::block::table_cell::Style::Title)));
+            data.flush_and_add_token(Token::CellSeparator(Some(crate::ast::table_cell::Style::Title)));
             i += 2;
           } else if is_next_eq(i+1, &chars, '<') {
-            data.flush_and_add_token(Token::CellSeparator(Some(crate::block::table_cell::Style::LeftAligned)));
+            data.flush_and_add_token(Token::CellSeparator(Some(crate::ast::table_cell::Style::LeftAligned)));
             i += 2;
           } else if is_next_eq(i+1, &chars, '>') {
-            data.flush_and_add_token(Token::CellSeparator(Some(crate::block::table_cell::Style::RightAligned)));
+            data.flush_and_add_token(Token::CellSeparator(Some(crate::ast::table_cell::Style::RightAligned)));
             i += 2;
           } else if is_next_eq(i+1, &chars, '=') {
-            data.flush_and_add_token(Token::CellSeparator(Some(crate::block::table_cell::Style::CenterAligned)));
+            data.flush_and_add_token(Token::CellSeparator(Some(crate::ast::table_cell::Style::CenterAligned)));
             i += 2;
           } else {
             data.flush_and_add_token(Token::CellSeparator(None));
@@ -287,7 +279,7 @@ pub fn tokenize(s: String) -> Vec<Token> {
             if chars[i+8] != '|' { ok = false; }
 
             if ok {
-              data.flush_and_add_token(Token::ColoredBeginColorCode((&chars[i+2..i+8]).iter().collect()));
+              data.flush_and_add_token(Token::ColoredBeginColorCode(chars[i+2..i+8].iter().collect()));
               i += 2 /* ## */ + 6 /* RGB */ + 1 /* | */ - 1;
               break 'sharp_match;
             }
@@ -313,7 +305,7 @@ pub fn tokenize(s: String) -> Vec<Token> {
             "yellow",
           ];
 
-          let s: String = (&chars[i+2..std::cmp::min(i+2+8, chars.len())]).iter().collect();
+          let s: String = chars[i+2..std::cmp::min(i+2+8, chars.len())].iter().collect();
 
           for wikidot_preset_color_string in wikidot_preset_colors {
             if s.starts_with(wikidot_preset_color_string) && s.chars().nth(wikidot_preset_color_string.len()) == Some('|') {
