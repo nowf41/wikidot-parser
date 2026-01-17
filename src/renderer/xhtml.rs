@@ -23,7 +23,7 @@ pub fn render(ast: Vec<crate::ast::TreeElement>) -> String {
         }
 
         TreeElement::Text(text) => {
-          res.write(&builder::Builder::escape_chars(&text));
+          res.write(&text);
         }
 
         TreeElement::Bold(children) => {
@@ -78,7 +78,7 @@ pub fn render(ast: Vec<crate::ast::TreeElement>) -> String {
             attrs.push(("rel", "noopener noreferrer"));
           }
           res.open(String::from("a"), attrs);
-          res.write(&builder::Builder::escape_chars(&name));
+          res.write(&name);
           res.close()
         }
 
@@ -101,7 +101,7 @@ pub fn render(ast: Vec<crate::ast::TreeElement>) -> String {
         }
 
         TreeElement::Iframe(raw) => { // TODO size?
-          res.open(String::from("iframe"), vec![("srcdoc", &builder::Builder::escape_chars(&raw))]);
+          res.open(String::from("iframe"), vec![("srcdoc", &raw)]);
           res.close();
         }
 
