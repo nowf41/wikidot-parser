@@ -7,17 +7,16 @@ mod data_builder;
 #[derive(PartialEq, Eq, Debug)]
 pub enum BlockLevelAttribute {
   BlockQuote(Vec<BlockLevelAttribute>),
-  Table(Vec<Vec<table_cell::Cell>>), // Inline以外中には入らないようにする必要がある.
-  TabView(Vec<(String, Vec<BlockLevelAttribute>)>),
+  Table(Vec<Vec<table_cell::BlockCell>>), // Inline以外中には入らないようにする必要がある.
+  TabView(Vec<BlockLevelAttribute>), // only contains Tabs
+  Tab{title: String, children: Vec<BlockLevelAttribute>},
 
   Inline(Vec<crate::tokenizer::Token>), // トップレベルのInlineは段落を示す.
 }
 
 pub enum BlockLevelFrame {
   BlockQuote,
-  TabView {
-    tabs: Vec<(String, Vec<BlockLevelAttribute>)>,
-  },
+  TabView,
   Tab{title: String},
   // Table ... trailing element
   // Inline ... trailing element
@@ -43,7 +42,7 @@ pub fn parse(tokens: Vec<crate::tokenizer::Token>) -> Vec<BlockLevelAttribute> {
 
         match name.as_str() {
           "tabview" => {
-            db.push(BlockLevelFrame::TabView { tabs: vec![] });
+            db.push(BlockLevelFrame::TabView);
           }
 
           "tab" => {
@@ -75,7 +74,7 @@ pub fn parse(tokens: Vec<crate::tokenizer::Token>) -> Vec<BlockLevelAttribute> {
 
         match name.as_str() {
           "tabview" => {
-            if let Some(BlockLevelFrame::TabView { tabs: _ }) = db.get_last_frame() {
+            if let Some(BlockLevelFrame::TabView) = db.get_last_frame() {
               db.pop_and_merge();
             }
           }
@@ -163,8 +162,8 @@ mod tests {
       BlockLevelAttribute::Inline(vec![Token::Text(String::from("a"))]),
       BlockLevelAttribute::Table(vec![
         vec![
-          crate::block::table_cell::Cell { val: vec![Token::Text(String::from(" a "))], style: None, spanning: nz(1) },
-          crate::block::table_cell::Cell { val: vec![Token::Text(String::from(" b "))], style: None, spanning: nz(1) },
+          crate::block::table_cell::BlockCell { val: vec![Token::Text(String::from(" a "))], style: None, spanning: nz(1) },
+          crate::block::table_cell::BlockCell { val: vec![Token::Text(String::from(" b "))], style: None, spanning: nz(1) },
         ]
       ]),
       BlockLevelAttribute::Inline(vec![Token::Text(String::from("c"))]),
@@ -220,10 +219,10 @@ mod tests {
 
     assert_eq!(parsed, vec![
       BlockLevelAttribute::TabView(vec![
-        (String::from("Tab 1"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 1"))])]),
-        (String::from("Tab 2"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 2"))])]),
-        (String::from("Tab 3"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 3"))])]),
-      ]),
+        BlockLevelAttribute::Tab{title: String::from("Tab 1"), children: vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 1"))])]},
+        BlockLevelAttribute::Tab{title: String::from("Tab 2"), children: vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 2"))])]},
+        BlockLevelAttribute::Tab{title: String::from("Tab 3"), children: vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 3"))])]},
+      ])
     ]);
   }
 
@@ -248,10 +247,10 @@ mod tests {
     assert_eq!(parsed, vec![
       BlockLevelAttribute::BlockQuote(vec![
         BlockLevelAttribute::TabView(vec![
-          (String::from("Tab 1"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 1"))])]),
-          (String::from("Tab 2"), vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 2"))])]),
+          BlockLevelAttribute::Tab{title: String::from("Tab "), children: vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 1"))])]},
+          BlockLevelAttribute::Tab{title: String::from("Tab "), children: vec![BlockLevelAttribute::Inline(vec![Token::Text(String::from("txt 2"))])]},
         ]),
-      ]),
+      ])
     ]);
   }
 }

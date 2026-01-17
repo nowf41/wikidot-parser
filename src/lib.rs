@@ -11,6 +11,7 @@ fn parse(s: String) -> Result<(), Box<dyn std::error::Error>> {
   let token = tokenizer::tokenize(s);
   let block_tree = block::parse(token);
   let ast = inline::parse(block_tree);
+  
 
   Ok(())
 }

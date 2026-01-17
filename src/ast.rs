@@ -2,7 +2,7 @@
 pub struct CssSize(String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Url(String);
+pub struct Url(pub String); // TODO validate
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WikidotColor {
@@ -58,8 +58,15 @@ pub mod table_cell {
   }
 
   #[derive(Debug, Clone, PartialEq, Eq)]
-  pub struct Cell {
+  pub struct BlockCell {
     pub val: Vec<crate::tokenizer::Token>,
+    pub style: Option<Style>,
+    pub spanning: std::num::NonZeroUsize,
+  }
+
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub struct Cell {
+    pub val: Vec<crate::ast::TreeElement>,
     pub style: Option<Style>,
     pub spanning: std::num::NonZeroUsize,
   }
@@ -67,6 +74,7 @@ pub mod table_cell {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeElement {
+  Paragraph(Vec<TreeElement>),
   Text(String),
   Bold(Vec<TreeElement>),
   Italics(Vec<TreeElement>),
@@ -77,20 +85,26 @@ pub enum TreeElement {
   Subscript(Vec<TreeElement>),
   Colored{color: WikidotColor, children: Vec<TreeElement>},
   Size{scale: CssSize, children: Vec<TreeElement>}, // scaleは有効なCSS値
-  Link{href: Url, open_in_new_tab: bool},
-  InternalLink{href: String, open_in_new_tab: bool},
+  Link{href: Url, open_in_new_tab: bool, name: String}, // TODO implement parsing name as wikidot string
+  InternalLink{href: String, open_in_new_tab: bool, name: String}, // TODO implement parsing name as wikidot string
   Collapsible(Vec<TreeElement>),
   Footnote{id: u32, children: Vec<TreeElement>}, // idは構文解析時に自動的に生成
   QuoteBlock(Vec<TreeElement>),
   Iframe(String), // the value is raw HTML element string
-  TabView(Vec<(String, Vec<TreeElement>)>),
+  Tab{
+    title: String,
+    children: Vec<TreeElement>,
+  },
+  TabView(Vec<TreeElement>), // only holds Tabs
   Table(Vec<Vec<table_cell::Cell>>),
+  NewLine,
 
   HtmlElement{tag: String, property: Vec<(String, String)>, children: Vec<TreeElement>},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseFrame {
+  Paragraph,
   Bold,
   Italics,
   Underline,
@@ -98,7 +112,7 @@ pub enum ParseFrame {
   Monospaced,
   Superscript,
   Subscript,
-  Colored{color: WikidotColor},
+  Colored{red: u8, green: u8, blue: u8},
   Size{scale: CssSize},
   // Link does not contain children
   // InternalLink does not contain children
@@ -106,7 +120,8 @@ pub enum ParseFrame {
   Footnote{id: u32},
   QuoteBlock,
   // Iframe is a single element. The values are written in HTML and they won't be parsed.
-  TabView(Vec<(String, Vec<TreeElement>)>), // Tabs will be joined to this (this is a special procession)
+  Tab(String),
+  TabView, // this is a div element internally, just for showing renderers begin of TabView
   // Table does not contain TreeElement children
 
   HtmlElement{tag: String, property: Vec<(String, String)>}, // should be filtered by its tag
@@ -115,6 +130,7 @@ pub enum ParseFrame {
 impl ParseFrame {
   pub fn into_tree_element(self, children: Vec<TreeElement>) -> TreeElement {
     match self {
+      ParseFrame::Paragraph => TreeElement::Paragraph(children),
       ParseFrame::Bold => TreeElement::Bold(children),
       ParseFrame::Italics => TreeElement::Italics(children),
       ParseFrame::Underline => TreeElement::Underline(children),
@@ -127,14 +143,37 @@ impl ParseFrame {
       ParseFrame::Collapsible => TreeElement::Collapsible(children),
       ParseFrame::Footnote{id} => TreeElement::Footnote{id, children},
       ParseFrame::QuoteBlock => TreeElement::QuoteBlock(children),
-      ParseFrame::TabView(tabs) => TreeElement::TabView(tabs),
+      ParseFrame::Tab(title) => TreeElement::Tab{title, children},
+      ParseFrame::TabView => TreeElement::TabView(children),
       ParseFrame::HtmlElement { tag, property } => TreeElement::HtmlElement { tag, property, children },
+    }
+  }
+
+  pub fn get_kind(&self) -> ParseFrameKind {
+    match self {
+      ParseFrame::Paragraph => ParseFrameKind::Paragraph,
+      ParseFrame::Bold => ParseFrameKind::Bold,
+      ParseFrame::Italics => ParseFrameKind::Italics,
+      ParseFrame::Underline => ParseFrameKind::Underline,
+      ParseFrame::Strikethrough => ParseFrameKind::Strikethrough,
+      ParseFrame::Monospaced => ParseFrameKind::Monospaced,
+      ParseFrame::Superscript => ParseFrameKind::Superscript,
+      ParseFrame::Subscript => ParseFrameKind::Subscript,
+      ParseFrame::Colored{..} => ParseFrameKind::Colored,
+      ParseFrame::Size{..} => ParseFrameKind::Size,
+      ParseFrame::Collapsible => ParseFrameKind::Collapsible,
+      ParseFrame::Footnote{..} => ParseFrameKind::Footnote,
+      ParseFrame::QuoteBlock =>  ParseFrameKind::QuoteBlock,
+      ParseFrame::Tab{..} => ParseFrameKind::Tab,
+      ParseFrame::TabView => ParseFrameKind::TabView,
+      ParseFrame::HtmlElement{tag, ..} => ParseFrameKind::HtmlElement{tag: tag.clone()},
     }
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseFrameKind {
+  Paragraph,
   Bold,
   Italics,
   Underline,
@@ -147,49 +186,7 @@ pub enum ParseFrameKind {
   Collapsible,
   Footnote,
   QuoteBlock,
+  Tab,
   TabView,
-  HtmlElement
-}
-
-impl From<&ParseFrame> for ParseFrameKind {
-  fn from(fr: &ParseFrame) -> ParseFrameKind {
-    match fr {
-      ParseFrame::Bold => Self::Bold,
-      ParseFrame::Italics => Self::Italics,
-      ParseFrame::Underline => Self::Underline,
-      ParseFrame::Strikethrough => Self::Strikethrough,
-      ParseFrame::Monospaced => Self::Monospaced,
-      ParseFrame::Superscript => Self::Superscript,
-      ParseFrame::Subscript => Self::Subscript,
-      ParseFrame::Colored{..} => Self::Colored,
-      ParseFrame::Size{..} => Self::Size,
-      ParseFrame::Collapsible => Self::Collapsible,
-      ParseFrame::Footnote{..} => Self::Footnote,
-      ParseFrame::QuoteBlock => Self::QuoteBlock,
-      ParseFrame::TabView{..} => Self::TabView,
-      ParseFrame::HtmlElement{..} => Self::HtmlElement,
-    }
-  }
-}
-
-/// Convert ParseFrameKind into ParseFrame if it is possible to fill out every field of the ParseFrame.
-impl From<&ParseFrameKind> for Option<ParseFrame> {
-  fn from(kind: &ParseFrameKind) -> Option<ParseFrame> {
-    match kind {
-      ParseFrameKind::Bold => Some(ParseFrame::Bold),
-      ParseFrameKind::Italics => Some(ParseFrame::Italics),
-      ParseFrameKind::Underline => Some(ParseFrame::Underline),
-      ParseFrameKind::Strikethrough => Some(ParseFrame::Strikethrough),
-      ParseFrameKind::Monospaced => Some(ParseFrame::Monospaced),
-      ParseFrameKind::Superscript => Some(ParseFrame::Superscript),
-      ParseFrameKind::Subscript => Some(ParseFrame::Subscript),
-      ParseFrameKind::Colored => None,
-      ParseFrameKind::Size => None,
-      ParseFrameKind::Collapsible => Some(ParseFrame::Collapsible),
-      ParseFrameKind::Footnote => None,
-      ParseFrameKind::QuoteBlock => Some(ParseFrame::QuoteBlock),
-      ParseFrameKind::TabView => None,
-      ParseFrameKind::HtmlElement => None,
-    }
-  }
+  HtmlElement{tag: String},
 }

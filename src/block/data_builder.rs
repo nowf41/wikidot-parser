@@ -51,13 +51,10 @@ impl DataBuilder {
 
     if let Some((now_frame, now_children)) = self.pop() {
       let push_target: &mut Vec<BlockLevelAttribute>;
-      let now_parent: Option<&mut BlockLevelFrame>;
       if let Some(ar) = self.data.last_mut() {
         push_target = &mut ar.1;
-        now_parent = Some(&mut ar.0);
       } else {
         push_target = &mut self.root;
-        now_parent = None;
       }
 
       match now_frame {
@@ -65,14 +62,12 @@ impl DataBuilder {
           push_target.push(BlockLevelAttribute::BlockQuote(now_children));
         }
 
-        BlockLevelFrame::TabView{tabs} => {
-          push_target.push(BlockLevelAttribute::TabView(tabs));
+        BlockLevelFrame::TabView => {
+          push_target.push(BlockLevelAttribute::TabView(now_children));
         }
 
         BlockLevelFrame::Tab { title } => {
-          if let Some(BlockLevelFrame::TabView { tabs }) = now_parent {
-            tabs.push((title, now_children));
-          }
+          push_target.push(BlockLevelAttribute::Tab { title, children: now_children });
         }
       }
       true
@@ -91,6 +86,8 @@ impl DataBuilder {
   }
 
   pub fn add(&mut self, data: BlockLevelAttribute) {
+    self.flush();
+
     if let Some((_, target)) = self.data.last_mut() {
       target.push(data);
     }
@@ -103,13 +100,13 @@ impl DataBuilder {
     }
   }
 
-  fn is_empty(&self) -> bool {
+  fn stack_is_empty(&self) -> bool {
     self.data.is_empty()
   }
 
   pub fn set_bq_depth(&mut self, depth: usize) {
     if self.blockquote_depth_count > depth {
-      while self.blockquote_depth_count > depth && !self.is_empty() {
+      while self.blockquote_depth_count > depth && !self.stack_is_empty() {
         self.pop_and_merge();
       }
     }

@@ -7,8 +7,8 @@ pub enum Token {
   Strikethrough, // --
   MonospacedOpen, // {{
   MonospacedClose, // }}
-  SuperScript, // ^^
-  SubScript, // ,,
+  Superscript, // ^^
+  Subscript, // ,,
   ElementBegin{name: String, attributes: Vec<(String, String)>}, // [[span style="color:red"]]
   ElementEnd(String), // [[/span]]
   ColoredBeginColorCode(String), // ##color|
@@ -21,6 +21,35 @@ pub enum Token {
   NewLine, // \n
 
   Text(String)
+}
+
+use crate::ast::ParseFrame;
+impl TryFrom<Token> for crate::ast::ParseFrame {
+  type Error = ();
+
+  fn try_from(value: Token) -> Result<Self, Self::Error> {
+      match value {
+        Token::Bold => Ok(ParseFrame::Bold),
+        Token::Italics => Ok(ParseFrame::Italics),
+        Token::Underline => Ok(ParseFrame::Underline),
+        Token::Strikethrough => Ok(ParseFrame::Strikethrough),
+        Token::MonospacedOpen => Err(()),
+        Token::MonospacedClose => Err(()),
+        Token::Superscript => Ok(ParseFrame::Superscript),
+        Token::Subscript => Ok(ParseFrame::Subscript),
+        Token::ElementBegin { name: _, attributes: _ } => Err(()),
+        Token::ElementEnd(_) => Err(()),
+        Token::ColoredBeginColorName(_) => Err(()),
+        Token::ColoredBeginColorCode(_) => Err(()),
+        Token::ColoredEnd => Err(()),
+        Token::NamedLink { link: _, name: _ } => Err(()),
+        Token::PageLink { link: _, name: _ } => Err(()),
+        Token::BlockQuote(_) => Err(()),
+        Token::CellSeparator(_) => Err(()),
+        Token::NewLine => Err(()),
+        Token::Text(_) => Err(()),
+      }
+  }
 }
 
 
@@ -100,8 +129,8 @@ pub fn tokenize(s: String) -> Vec<Token> {
     ('-', Token::Strikethrough),
     ('{', Token::MonospacedOpen),
     ('}', Token::MonospacedClose),
-    ('^', Token::SuperScript),
-    (',', Token::SubScript),
+    ('^', Token::Superscript),
+    (',', Token::Subscript),
   ];
 
   let mut i = 0;
@@ -396,9 +425,9 @@ mod test {
   fn test_superscript() {
     assert_eq!(tokenize("Super^^scripted^^text"), vec![
       Token::Text(String::from("Super")),
-      Token::SuperScript,
+      Token::Superscript,
       Token::Text(String::from("scripted")),
-      Token::SuperScript,
+      Token::Superscript,
       Token::Text(String::from("text")),
     ]);
   }
@@ -407,9 +436,9 @@ mod test {
   fn test_subscript() {
     assert_eq!(tokenize("Sub,,scripted,,text"), vec![
       Token::Text(String::from("Sub")),
-      Token::SubScript,
+      Token::Subscript,
       Token::Text(String::from("scripted")),
-      Token::SubScript,
+      Token::Subscript,
       Token::Text(String::from("text")),
     ]);
   }

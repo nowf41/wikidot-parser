@@ -4,7 +4,7 @@ pub fn parse_table(buf: &mut Vec<crate::tokenizer::Token>) -> Vec<super::BlockLe
 
   let mut res: Vec<super::BlockLevelAttribute> = vec![];
 
-  let mut table: Vec<Vec<super::table_cell::Cell>> = vec![];
+  let mut table: Vec<Vec<super::table_cell::BlockCell>> = vec![];
   let mut spanning_count = 0;
   let mut is_table_line = false;
   let mut now_buf: Vec<crate::tokenizer::Token> = vec![];
@@ -31,7 +31,7 @@ pub fn parse_table(buf: &mut Vec<crate::tokenizer::Token>) -> Vec<super::BlockLe
           // 左にセルがあるならそれを書き出す.
           // もし直前がセパレータならnow_bufは空であるから, Spanningを消して良い
           if !now_buf.is_empty() && !is_last_newline {
-            table.last_mut().unwrap().push(super::table_cell::Cell {
+            table.last_mut().unwrap().push(super::table_cell::BlockCell {
               val: std::mem::take(&mut now_buf),
               style: recent_cell_style,
               spanning: spanning_count.try_into().unwrap(),
@@ -122,7 +122,7 @@ pub fn parse_table(buf: &mut Vec<crate::tokenizer::Token>) -> Vec<super::BlockLe
 }
 
 mod tests {
-  use crate::{block::{BlockLevelAttribute, table_cell::{Cell, Style}}, tokenizer::Token};
+  use crate::{block::{BlockLevelAttribute, table_cell::{BlockCell, Style}}, tokenizer::Token};
   use super::*;
   use crate::tokenizer;
 
@@ -150,9 +150,9 @@ mod tests {
       BlockLevelAttribute::Inline(vec![Token::Text(String::from("b"))]),
       BlockLevelAttribute::Table(vec![
         vec![
-          Cell { val: vec![Token::Text(String::from(" a "))], style: None, spanning: nz(1) },
-          Cell { val: vec![Token::Text(String::from(" b "))], style: None, spanning: nz(1) },
-          Cell { val: vec![Token::Text(String::from(" c "))], style: None, spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" a "))], style: None, spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" b "))], style: None, spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" c "))], style: None, spanning: nz(1) },
         ]
       ]),
       BlockLevelAttribute::Inline(vec![Token::Text(String::from("a"))]),
@@ -166,14 +166,14 @@ mod tests {
       BlockLevelAttribute::Inline(vec![Token::Text(String::from("b"))]),
       BlockLevelAttribute::Table(vec![
         vec![
-          Cell { val: vec![Token::Text(String::from(" a "))], style: Some(Style::Title), spanning: nz(1) },
-          Cell { val: vec![Token::Text(String::from(" b "))], style: Some(Style::Title), spanning: nz(1) },
-          Cell { val: vec![Token::Text(String::from(" c "))], style: Some(Style::Title), spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" a "))], style: Some(Style::Title), spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" b "))], style: Some(Style::Title), spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" c "))], style: Some(Style::Title), spanning: nz(1) },
         ],
         vec![
-          Cell { val: vec![Token::Text(String::from(" d "))], style: Some(Style::LeftAligned), spanning: nz(1) },
-          Cell { val: vec![Token::Text(String::from(" e"))], style: Some(Style::RightAligned), spanning: nz(1) },
-          Cell { val: vec![Token::Text(String::from("f "))], style: Some(Style::CenterAligned), spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" d "))], style: Some(Style::LeftAligned), spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from(" e"))], style: Some(Style::RightAligned), spanning: nz(1) },
+          BlockCell { val: vec![Token::Text(String::from("f "))], style: Some(Style::CenterAligned), spanning: nz(1) },
         ]
       ]),
       BlockLevelAttribute::Inline(vec![Token::Text(String::from("g"))]),
